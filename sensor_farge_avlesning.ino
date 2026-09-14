@@ -80,31 +80,35 @@ void loop()
     Serial.print('\t');
   }
   Serial.println(position);
-  /*
-  delay(250);
+  int middle_sensor = sensorValues[2]+sensorValues[3];
+  int left_sensor = sensorValues[0]+sensorValues[1];
+  int right_sensor = sensorValues[4]+sensorValues[5];
 
-  digitalWrite(AIN1, HIGH); // set pin 1 to high
-  analogWrite(PWMA, 255);
-  digitalWrite(BIN1, LOW); // set pin 1 to high
-  digitalWrite(BIN2, HIGH);  // set pin 2 to low
-  digitalWrite(AIN2, LOW);  // set pin 2 to low
-  analogWrite(PWMB, 255);
-  delay(250);
-
-  digitalWrite(AIN1, LOW);  // set pin 1 to low
-  digitalWrite(AIN2, HIGH); // set pin 2 to high
-  analogWrite(PWMA, 255);
-  digitalWrite(BIN1, HIGH);  // set pin 1 to low
-  digitalWrite(BIN2, LOW); // set pin 2 to high
-  analogWrite(PWMB, 255);
-
-  delay(250);
-  digitalWrite(AIN1, LOW); // set pin 1 to low
-  digitalWrite(AIN2, LOW); // set pin 2 to low
-  analogWrite(PWMA, 0);
-  digitalWrite(BIN1, LOW); // set pin 1 to low
-  digitalWrite(BIN2, LOW); // set pin 2 to low
-  analogWrite(PWMB, 0);*/
+  if (middle_sensor < left_sensor && right_sensor < left_sensor) {  
+    digitalWrite(AIN1, LOW);  // set pin 1 to low
+    digitalWrite(AIN2, HIGH); // set pin 2 to high
+    analogWrite(PWMA, 100);
+    digitalWrite(BIN1, HIGH);  // set pin 1 to low
+    digitalWrite(BIN2, LOW); // set pin 2 to high
+    analogWrite(PWMB, 100);
+  } 
+  else if (middle_sensor < right_sensor && right_sensor > left_sensor) {
+    digitalWrite(AIN1, LOW); // set pin 1 to low
+    digitalWrite(AIN2, LOW); // set pin 2 to low
+    analogWrite(PWMA, 0);
+    digitalWrite(BIN1, LOW); // set pin 1 to low
+    digitalWrite(BIN2, LOW); // set pin 2 to low
+    analogWrite(PWMB, 0);
+  }
+  else {
+    digitalWrite(AIN1, HIGH); // set pin 1 to high
+    analogWrite(PWMA, 100);
+    digitalWrite(BIN1, LOW); // set pin 1 to high
+    digitalWrite(BIN2, HIGH);  // set pin 2 to low
+    digitalWrite(AIN2, LOW);  // set pin 2 to low
+    analogWrite(PWMB, 100);    
+  }
+  
 }
 
 //https://learn.sparkfun.com/tutorials/activity-guide-for-sparkfun-tinker-kit/circuit-10-motor-basics
