@@ -10,6 +10,9 @@ uint16_t sensorValues[SensorCount];
 const int AIN1 = 13; // control pin 1 on the motor driver for the right motor
 const int AIN2 = 12; // control pin 2 on the motor driver for the right motor
 const int PWMA = 11; // speed control pin on the motor driver for the right motor
+const int BIN1 = 8;
+const int BIN2 = 9;
+const int PWMB = 10;
 
 // VARIABLES
 int motorSpeed = 0; // starting speed for the motor
@@ -24,6 +27,9 @@ void setup()
   pinMode(AIN1, OUTPUT);
   pinMode(AIN2, OUTPUT);
   pinMode(PWMA, OUTPUT);
+  pinMode(BIN1, OUTPUT);
+  pinMode(BIN2, OUTPUT);
+  pinMode(PWMB, OUTPUT);
 
   delay(500);
   pinMode(LED_BUILTIN, OUTPUT);
@@ -74,22 +80,31 @@ void loop()
     Serial.print('\t');
   }
   Serial.println(position);
-
+  /*
   delay(250);
 
   digitalWrite(AIN1, HIGH); // set pin 1 to high
-  digitalWrite(AIN2, LOW);  // set pin 2 to low
   analogWrite(PWMA, 255);
+  digitalWrite(BIN1, LOW); // set pin 1 to high
+  digitalWrite(BIN2, HIGH);  // set pin 2 to low
+  digitalWrite(AIN2, LOW);  // set pin 2 to low
+  analogWrite(PWMB, 255);
   delay(250);
 
   digitalWrite(AIN1, LOW);  // set pin 1 to low
   digitalWrite(AIN2, HIGH); // set pin 2 to high
   analogWrite(PWMA, 255);
+  digitalWrite(BIN1, HIGH);  // set pin 1 to low
+  digitalWrite(BIN2, LOW); // set pin 2 to high
+  analogWrite(PWMB, 255);
 
   delay(250);
   digitalWrite(AIN1, LOW); // set pin 1 to low
   digitalWrite(AIN2, LOW); // set pin 2 to low
   analogWrite(PWMA, 0);
+  digitalWrite(BIN1, LOW); // set pin 1 to low
+  digitalWrite(BIN2, LOW); // set pin 2 to low
+  analogWrite(PWMB, 0);*/
 }
 
 //https://learn.sparkfun.com/tutorials/activity-guide-for-sparkfun-tinker-kit/circuit-10-motor-basics
