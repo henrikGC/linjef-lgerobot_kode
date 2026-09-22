@@ -8,6 +8,11 @@ uint16_t sensorValues[SensorCount];
 const int switchPin = 3;
 bool isMotorOn = false;
 
+
+
+int isCalibrationLightOn = false;
+
+
 const int AIN1 = 13;
 const int AIN2 = 12;
 const int PWMA = 11;
@@ -18,8 +23,8 @@ const int PWMB = 10;
 const int speed = 175;
 int motorSpeed = 0;
 
-
-bool isCalibrated = false;
+const int callibrationPin = 7;
+bool isCalibrated = true;
 
 bool isPrintingSensorData = true;
 bool isPrintingPosition = true;
@@ -75,6 +80,8 @@ void setup()
 {
   Serial.begin(9600);
 
+  pinMode(LED_BUILTIN, OUTPUT);
+
   leftMotor.begin();
   rightMotor.begin();
 
@@ -90,16 +97,21 @@ void setup()
   // LEDON koblet til D2
   qtr.setEmitterPin(2);
 
-  for (uint16_t i = 0; i < 400; i++) {
-    qtr.calibrate();
-    delay(10);
-  }
+
 
   Serial.println("Sensor test starter...");
+  
 }
 
 void loop()
 {
+
+  bool callibrating = digitalRead(callibrationPin);
+  if (callibrating) {
+    isCalibrated = false;
+  }
+
+
   bool switching = digitalRead(switchPin);
   if (switching) {
     isMotorOn = !isMotorOn;
@@ -107,6 +119,17 @@ void loop()
   
   // Leser råverdiene fra alle 6 sensorene
   //qtr.read(sensorValues);
+
+  if (!isCalibrated) {
+    for (uint16_t i = 0; i < 400; i++) {
+      qtr.calibrate();
+      digitalWrite(LED_BUILTIN, isCalibrationLightOn);
+      isCalibrationLightOn = !isCalibrationLightOn;
+      delay(10);
+    }
+    isCalibrated = true;
+  }
+
   qtr.readCalibrated(sensorValues);
 
   for (uint8_t i = 0; i < SensorCount; i++)
@@ -123,21 +146,38 @@ void loop()
     // position = 1000;
 
   if (isMotorOn) {
+    
+    float proportionalGain = 0.3;
+    int error = position - 2500;
+    int turn = error * proportionalGain;
+    int motorBuff = 55;
 
+
+    int topSpeed = 100;
+    int baseRight = topSpeed;
+    int baseLeft  = topSpeed;
+
+
+    int rightSpeed = constrain(baseRight + turn, 0, topSpeed);
+    int leftSpeed  = constrain(baseLeft  - turn, 0, topSpeed);
+
+    rightMotor.driveForward(rightSpeed);
+    leftMotor.driveForward(leftSpeed);
+/*
   if (position > 2000 && position < 3000)
   {
     Serial.println("forward");
 
     rightMotor.driveForward(speed);
-    leftMotor.driveForward(speed);
+    leftMotor.driveForward(speed  - 60);
   }
 
   else if (position <= 2000)
   {
     Serial.println("left");
 
-    leftMotor.driveForward(speed);
     rightMotor.driveBackward(speed);
+    leftMotor.driveForward(speed - 60);
 
     //turn left;
   }
@@ -146,8 +186,8 @@ void loop()
   {
     Serial.println("right");
 
-    leftMotor.driveBackward(speed);
     rightMotor.driveForward(speed);
+    leftMotor.driveBackward(speed - 60);
 
     //turn right;
   }
@@ -156,6 +196,8 @@ void loop()
   {
     Serial.println("ERROR");
   }
+*/
+
   }
   else 
 {
@@ -166,5 +208,5 @@ void loop()
   Serial.println("MOTORS OFF");
 }
   
-  delay(250);
+  //delay(250);
 }
