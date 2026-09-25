@@ -1,5 +1,5 @@
 #include <QTRSensors.h>
-
+#include <algorithm>
 QTRSensors qtr;
 
 const uint8_t SensorCount = 6;
@@ -29,6 +29,7 @@ bool isCalibrated = true;
 bool isPrintingSensorData = true;
 bool isPrintingPosition = true;
 
+uint16_t lastKnownPosition;
 
 class Motor {
 
@@ -143,11 +144,19 @@ void loop()
   uint16_t position = qtr.readLineBlack(sensorValues);
   Serial.println(position);
 
+  bool noLine = false;
+  if (!sensorValues.includes(1000)) {
+    bool noLine = true;
+  }
+  else {
+    lastKnownPosition = position;
+  }
+
     // position = 1000;
 
   if (isMotorOn) {
     
-    float proportionalGain = 0.3;
+    float proportionalGain = 0.08;
     int error = position - 2500;
     int turn = error * proportionalGain;
     int motorBuff = 55;
@@ -160,19 +169,13 @@ void loop()
 
     int rightSpeed = constrain(baseRight + turn, 0, topSpeed);
     int leftSpeed  = constrain(baseLeft  - turn, 0, topSpeed);
+    if (!noLine) {
+      rightMotor.driveForward(rightSpeed);
+      leftMotor.driveForward(leftSpeed);
+    }
+    else {
 
-    rightMotor.driveForward(rightSpeed);
-    leftMotor.driveForward(leftSpeed);
-/*
-  if (position > 2000 && position < 3000)
-  {
-    Serial.println("forward");
-
-    rightMotor.driveForward(speed);
-    leftMotor.driveForward(speed  - 60);
-  }
-
-  else if (position <= 2000)
+  if (lastKnownPosition < 2500)
   {
     Serial.println("left");
 
@@ -182,7 +185,7 @@ void loop()
     //turn left;
   }
 
-  else if (position >= 3000)
+  else if (lastKnownPosition > 2500)
   {
     Serial.println("right");
 
@@ -192,11 +195,6 @@ void loop()
     //turn right;
   }
 
-  else
-  {
-    Serial.println("ERROR");
-  }
-*/
 
   }
   else 
