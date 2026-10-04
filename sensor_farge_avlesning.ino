@@ -1,39 +1,72 @@
 #include <QTRSensors.h>
-#include <algorithm>
+
 QTRSensors qtr;
 
 const uint8_t SensorCount = 6;
 uint16_t sensorValues[SensorCount];
 
+
+// ======================================================
+// KNAPPER
+// ======================================================
+
 const int switchPin = 3;
+const int callibrationPin = 7;
+
 bool isMotorOn = false;
+bool isCalibrated = true;
+
+bool lastSwitchState = LOW;
+bool lastCalibrationState = LOW;
 
 
+// ======================================================
+// SENSOR / STYRING
+// ======================================================
 
-int isCalibrationLightOn = false;
+int lastError = 0;
 
+bool isCalibrationLightOn = false;
+
+int lastLeftSpeed = 0;
+int lastRightSpeed = 0;
+
+int lostDirection = 2;
+
+
+// ======================================================
+// PD-INNSTILLINGER
+// ======================================================
+
+const float proportionalGain = 0.020;
+const float derivativeGain = 0.12;
+
+// ØKT HASTIGHET
+const int baseSpeed = 150;
+const int topSpeed = 160;
+
+
+// ======================================================
+// MOTORPINNER
+// ======================================================
 
 const int AIN1 = 13;
 const int AIN2 = 12;
 const int PWMA = 11;
+
 const int BIN1 = 8;
 const int BIN2 = 9;
 const int PWMB = 10;
 
-const int speed = 175;
-int motorSpeed = 0;
 
-const int callibrationPin = 7;
-bool isCalibrated = true;
-
-bool isPrintingSensorData = true;
-bool isPrintingPosition = true;
-
-uint16_t lastKnownPosition;
+// ======================================================
+// MOTOR CLASS
+// ======================================================
 
 class Motor {
 
   private:
+
     int IN1;
     int IN2;
     int PWM;
@@ -42,52 +75,88 @@ class Motor {
   public:
 
     Motor(int in1, int in2, int pwm) {
+
       IN1 = in1;
       IN2 = in2;
       PWM = pwm;
     }
 
+
     void begin() {
+
       pinMode(IN1, OUTPUT);
       pinMode(IN2, OUTPUT);
       pinMode(PWM, OUTPUT);
     }
 
-    void driveForward(int speed) {
-      digitalWrite(IN1, LOW);
-      digitalWrite(IN2, HIGH);
-      analogWrite(PWM, speed);
+
+    void drive(int speed) {
+
+      if (speed > 0) {
+
+        digitalWrite(IN1, HIGH);
+        digitalWrite(IN2, LOW);
+
+        analogWrite(PWM, speed);
+      }
+
+      else if (speed < 0) {
+
+        digitalWrite(IN1, LOW);
+        digitalWrite(IN2, HIGH);
+
+        analogWrite(PWM, -speed);
+      }
+
+      else {
+
+        stop();
+      }
     }
 
-    void driveBackward(int speed) {
-      digitalWrite(IN1, HIGH);
-      digitalWrite(IN2, LOW);
-      analogWrite(PWM, speed);
-    }
 
     void stop() {
+
       digitalWrite(IN1, LOW);
       digitalWrite(IN2, LOW);
+
       analogWrite(PWM, 0);
     }
-
 };
 
+
+// ======================================================
+// MOTOROBJEKTER
+// ======================================================
 
 Motor rightMotor(AIN1, AIN2, PWMA);
 Motor leftMotor(BIN1, BIN2, PWMB);
 
+
+// ======================================================
+// SETUP
+// ======================================================
+
 void setup()
 {
+
   Serial.begin(9600);
 
   pinMode(LED_BUILTIN, OUTPUT);
 
+  // Knappene bruker eksterne 10k pull-down motstander
+  pinMode(switchPin, INPUT);
+  pinMode(callibrationPin, INPUT);
+
+
+  // Motorer
   leftMotor.begin();
   rightMotor.begin();
 
-  // Zumo reflectance array bruker RC
+
+  // Zumo reflectance sensor array bruker RC
   qtr.setTypeRC();
+
 
   // Sensorene i fysisk rekkefølge
   qtr.setSensorPins(
@@ -95,116 +164,261 @@ void setup()
     SensorCount
   );
 
-  // LEDON koblet til D2
+
+  // LEDON på sensoren koblet til D2
   qtr.setEmitterPin(2);
 
 
-
-  Serial.println("Sensor test starter...");
-  
+  Serial.println("Robot klar");
 }
+
+
+// ======================================================
+// LOOP
+// ======================================================
 
 void loop()
 {
 
+  // ====================================================
+  // KALIBRERINGSKNAPP
+  // ====================================================
+
   bool callibrating = digitalRead(callibrationPin);
-  if (callibrating) {
+
+
+  // Reagerer bare på LOW -> HIGH
+  if (callibrating == HIGH &&
+      lastCalibrationState == LOW) {
+
     isCalibrated = false;
   }
 
 
+  lastCalibrationState = callibrating;
+
+
+
+  // ====================================================
+  // MOTOR ON/OFF-KNAPP
+  // ====================================================
+
   bool switching = digitalRead(switchPin);
-  if (switching) {
+
+
+  // Reagerer bare på LOW -> HIGH
+  if (switching == HIGH &&
+      lastSwitchState == LOW) {
+
     isMotorOn = !isMotorOn;
+
+
+    // Nullstill D-leddet når roboten startes
+    if (isMotorOn) {
+
+      lastError = 0;
+    }
   }
-  
-  // Leser råverdiene fra alle 6 sensorene
-  //qtr.read(sensorValues);
+
+
+  lastSwitchState = switching;
+
+
+
+  // ====================================================
+  // KALIBRERING
+  // ====================================================
 
   if (!isCalibrated) {
-    for (uint16_t i = 0; i < 400; i++) {
+
+    // Motorene skal ikke kjøre under kalibrering
+    rightMotor.stop();
+    leftMotor.stop();
+
+
+    for (uint16_t i = 0; i < 200; i++) {
+
       qtr.calibrate();
-      digitalWrite(LED_BUILTIN, isCalibrationLightOn);
-      isCalibrationLightOn = !isCalibrationLightOn;
+
+
+      digitalWrite(
+        LED_BUILTIN,
+        isCalibrationLightOn
+      );
+
+
+      isCalibrationLightOn =
+        !isCalibrationLightOn;
+
+
       delay(10);
     }
+
+
+    digitalWrite(LED_BUILTIN, LOW);
+
+
     isCalibrated = true;
+
+
+    // Nullstill regulatoren etter kalibrering
+    lastError = 0;
   }
 
-  qtr.readCalibrated(sensorValues);
 
-  for (uint8_t i = 0; i < SensorCount; i++)
-  {
-    Serial.print(sensorValues[i]);
-    Serial.print('\t');
-  }
 
-  Serial.println();
-  
-  uint16_t position = qtr.readLineBlack(sensorValues);
-  Serial.println(position);
+  // ====================================================
+  // LES SENSOR + FINN LINJEPOSISJON
+  // ====================================================
 
-  bool noLine = false;
-  if (!sensorValues.includes(1000)) {
-    bool noLine = true;
-  }
-  else {
-    lastKnownPosition = position;
-  }
+  uint16_t position =
+    qtr.readLineBlack(sensorValues);
 
-    // position = 1000;
+
+
+  // ====================================================
+  // MOTORSTYRING
+  // ====================================================
 
   if (isMotorOn) {
-    
-    float proportionalGain = 0.08;
-    int error = position - 2500;
-    int turn = error * proportionalGain;
-    int motorBuff = 55;
 
 
-    int topSpeed = 100;
-    int baseRight = topSpeed;
-    int baseLeft  = topSpeed;
+    // ==================================================
+    // PD-REGULATOR
+    // ==================================================
+
+    int error =
+      position - 2500;
 
 
-    int rightSpeed = constrain(baseRight + turn, 0, topSpeed);
-    int leftSpeed  = constrain(baseLeft  - turn, 0, topSpeed);
-    if (!noLine) {
-      rightMotor.driveForward(rightSpeed);
-      leftMotor.driveForward(leftSpeed);
+    int derivative =
+      error - lastError;
+
+
+    lastError =
+      error;
+
+
+    int turn =
+      error * proportionalGain +
+      derivative * derivativeGain;
+
+
+
+    // ==================================================
+    // BEREGN MOTORHASTIGHET
+    // ==================================================
+
+    int rightSpeed =
+      constrain(
+        baseSpeed + turn,
+        -topSpeed,
+        topSpeed
+      );
+
+
+    int leftSpeed =
+      constrain(
+        baseSpeed - turn,
+        -topSpeed,
+        topSpeed
+      );
+
+
+
+    // ==================================================
+    // SJEKK OM LINJEN ER SYNLIG
+    // ==================================================
+
+    bool noLineDetected = true;
+
+
+    for (uint8_t i = 0;
+         i < SensorCount;
+         i++) {
+
+      if (sensorValues[i] >= 700) {
+
+        noLineDetected = false;
+      }
     }
+
+
+
+    // ==================================================
+    // HUSK HVILKEN SIDE LINJEN FORSVANT PÅ
+    // ==================================================
+
+    if (sensorValues[0] >= 700) {
+
+      lostDirection = 0;
+    }
+
+
+    if (sensorValues[5] >= 700) {
+
+      lostDirection = 1;
+    }
+
+
+
+    // ==================================================
+    // LINJEN ER BORTE
+    // ==================================================
+
+    if (noLineDetected) {
+
+
+      // Linjen forsvant på venstre side
+      if (lostDirection == 0) {
+
+        rightMotor.drive(-topSpeed);
+        leftMotor.drive(topSpeed);
+      }
+
+
+      // Linjen forsvant på høyre side
+      else if (lostDirection == 1) {
+
+        rightMotor.drive(topSpeed);
+        leftMotor.drive(-topSpeed);
+      }
+
+
+      // Vi vet ikke hvor linjen er
+      else {
+
+        rightMotor.stop();
+        leftMotor.stop();
+      }
+    }
+
+
+
+    // ==================================================
+    // NORMAL LINJEFØLGING
+    // ==================================================
+
     else {
 
-  if (lastKnownPosition < 2500)
-  {
-    Serial.println("left");
+      lastLeftSpeed = leftSpeed;
+      lastRightSpeed = rightSpeed;
 
-    rightMotor.driveBackward(speed);
-    leftMotor.driveForward(speed - 60);
 
-    //turn left;
-  }
-
-  else if (lastKnownPosition > 2500)
-  {
-    Serial.println("right");
-
-    rightMotor.driveForward(speed);
-    leftMotor.driveBackward(speed - 60);
-
-    //turn right;
+      rightMotor.drive(rightSpeed);
+      leftMotor.drive(leftSpeed);
+    }
   }
 
 
-  }
-  else 
-{
-  // Bryteren er AV
-  rightMotor.stop();
-  leftMotor.stop();
 
-  Serial.println("MOTORS OFF");
-}
-  
-  //delay(250);
+  // ====================================================
+  // MOTORER AV
+  // ====================================================
+
+  else {
+
+    rightMotor.stop();
+    leftMotor.stop();
+  }
 }
