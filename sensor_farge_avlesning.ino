@@ -33,6 +33,8 @@ int lastRightSpeed = 0;
 
 int lostDirection = 2;
 
+unsigned long lastSeenMs = 0;
+
 
 // ======================================================
 // PD-INNSTILLINGER
@@ -41,9 +43,76 @@ int lostDirection = 2;
 const float proportionalGain = 0.020;
 const float derivativeGain = 0.12;
 
-// ØKT HASTIGHET
-const int baseSpeed = 150;
-const int topSpeed = 160;
+// Maksfart
+const int baseSpeed = 240;
+const int topSpeed = 240;
+
+// Maksimal vanlig PD-korreksjon
+const int maxTurn = 180;
+
+
+// ======================================================
+// DYNAMISK FART I VANLIGE SVINGER
+// ======================================================
+
+const int slowdownDivisor = 15;
+
+// Maks nedbremsing:
+// 240 - 90 = 150 PWM
+const int maxSlowdown = 90;
+
+
+// ======================================================
+// HARD-CORNER-MODUS
+// ======================================================
+
+// Når error blir større enn dette,
+// regner vi svingen som svært skarp.
+//
+// Center = 2500
+//
+// error > 1500 betyr:
+// position > 4000 eller position < 1000
+const int hardCornerThreshold = 1500;
+
+
+// I en hard 90-graders sving:
+// ytterhjulet kjører raskt fremover
+// innerhjulet går svakt i revers.
+//
+// Dette gjør at roboten roterer mye skarpere
+// enn vanlig PD-styring.
+const int hardCornerFastSpeed = 240;
+const int hardCornerReverseSpeed = 40;
+
+
+// ======================================================
+// LOST-LINE / BUMP-HÅNDTERING
+// ======================================================
+
+// Beholder 100 ms for humpene på banen.
+//
+// Hvis sensoren kortvarig mister linjen,
+// fortsetter roboten med siste kjente styring.
+const unsigned long lostGraceMs = 100;
+
+
+// Begrens store hopp i derivative-leddet
+const int maxDerivative = 300;
+
+
+// ======================================================
+// SEARCH-HASTIGHETER
+// ======================================================
+
+// Hvis linjen faktisk er borte etter 100 ms,
+// søker roboten videre mot siden linjen forsvant.
+const int searchFastSpeed = 165;
+const int searchSlowSpeed = 85;
+
+
+// Grense for svart linje
+const uint16_t lineThreshold = 700;
 
 
 // ======================================================
@@ -186,17 +255,13 @@ void loop()
 
   bool callibrating = digitalRead(callibrationPin);
 
-
-  // Reagerer bare på LOW -> HIGH
   if (callibrating == HIGH &&
       lastCalibrationState == LOW) {
 
     isCalibrated = false;
   }
 
-
   lastCalibrationState = callibrating;
-
 
 
   // ====================================================
@@ -205,24 +270,23 @@ void loop()
 
   bool switching = digitalRead(switchPin);
 
-
-  // Reagerer bare på LOW -> HIGH
   if (switching == HIGH &&
       lastSwitchState == LOW) {
 
     isMotorOn = !isMotorOn;
 
 
-    // Nullstill D-leddet når roboten startes
     if (isMotorOn) {
 
       lastError = 0;
+      lastSeenMs = millis();
+
+      lastLeftSpeed = 0;
+      lastRightSpeed = 0;
     }
   }
 
-
   lastSwitchState = switching;
-
 
 
   // ====================================================
@@ -231,7 +295,6 @@ void loop()
 
   if (!isCalibrated) {
 
-    // Motorene skal ikke kjøre under kalibrering
     rightMotor.stop();
     leftMotor.stop();
 
@@ -240,16 +303,13 @@ void loop()
 
       qtr.calibrate();
 
-
       digitalWrite(
         LED_BUILTIN,
         isCalibrationLightOn
       );
 
-
       isCalibrationLightOn =
         !isCalibrationLightOn;
-
 
       delay(10);
     }
@@ -257,14 +317,10 @@ void loop()
 
     digitalWrite(LED_BUILTIN, LOW);
 
-
     isCalibrated = true;
 
-
-    // Nullstill regulatoren etter kalibrering
     lastError = 0;
   }
-
 
 
   // ====================================================
@@ -275,55 +331,11 @@ void loop()
     qtr.readLineBlack(sensorValues);
 
 
-
   // ====================================================
   // MOTORSTYRING
   // ====================================================
 
   if (isMotorOn) {
-
-
-    // ==================================================
-    // PD-REGULATOR
-    // ==================================================
-
-    int error =
-      position - 2500;
-
-
-    int derivative =
-      error - lastError;
-
-
-    lastError =
-      error;
-
-
-    int turn =
-      error * proportionalGain +
-      derivative * derivativeGain;
-
-
-
-    // ==================================================
-    // BEREGN MOTORHASTIGHET
-    // ==================================================
-
-    int rightSpeed =
-      constrain(
-        baseSpeed + turn,
-        -topSpeed,
-        topSpeed
-      );
-
-
-    int leftSpeed =
-      constrain(
-        baseSpeed - turn,
-        -topSpeed,
-        topSpeed
-      );
-
 
 
     // ==================================================
@@ -337,79 +349,236 @@ void loop()
          i < SensorCount;
          i++) {
 
-      if (sensorValues[i] >= 700) {
+      if (sensorValues[i] >= lineThreshold) {
 
         noLineDetected = false;
       }
     }
 
 
-
     // ==================================================
     // HUSK HVILKEN SIDE LINJEN FORSVANT PÅ
     // ==================================================
 
-    if (sensorValues[0] >= 700) {
+    if (sensorValues[0] >= lineThreshold) {
 
       lostDirection = 0;
     }
 
 
-    if (sensorValues[5] >= 700) {
+    if (sensorValues[5] >= lineThreshold) {
 
       lostDirection = 1;
     }
 
 
-
     // ==================================================
-    // LINJEN ER BORTE
+    // LINJEN ER SYNLIG
     // ==================================================
 
-    if (noLineDetected) {
+    if (!noLineDetected) {
+
+      lastSeenMs = millis();
 
 
-      // Linjen forsvant på venstre side
-      if (lostDirection == 0) {
+      // ----------------------------------------------
+      // ERROR
+      // ----------------------------------------------
 
-        rightMotor.drive(-topSpeed);
-        leftMotor.drive(topSpeed);
+      int error =
+        (int)position - 2500;
+
+
+      // ----------------------------------------------
+      // DERIVATIVE
+      // ----------------------------------------------
+
+      int derivative = constrain(
+        error - lastError,
+        -maxDerivative,
+        maxDerivative
+      );
+
+
+      lastError = error;
+
+
+      // =================================================
+      // HARD-CORNER-MODUS
+      // =================================================
+      //
+      // Hvis linjen ligger helt ute mot kanten av
+      // sensorarrayet, trenger vi en mye kraftigere
+      // rotasjon enn vanlig PD gir.
+      // =================================================
+
+      if (abs(error) > hardCornerThreshold) {
+
+
+        // ---------------------------------------------
+        // HARD CORNER - SIDE 1
+        // ---------------------------------------------
+
+        if (error > 0) {
+
+          int rightSpeed =
+            hardCornerFastSpeed;
+
+          int leftSpeed =
+            -hardCornerReverseSpeed;
+
+
+          lastRightSpeed = rightSpeed;
+          lastLeftSpeed = leftSpeed;
+
+
+          rightMotor.drive(rightSpeed);
+          leftMotor.drive(leftSpeed);
+        }
+
+
+        // ---------------------------------------------
+        // HARD CORNER - SIDE 0
+        // ---------------------------------------------
+
+        else {
+
+          int rightSpeed =
+            -hardCornerReverseSpeed;
+
+          int leftSpeed =
+            hardCornerFastSpeed;
+
+
+          lastRightSpeed = rightSpeed;
+          lastLeftSpeed = leftSpeed;
+
+
+          rightMotor.drive(rightSpeed);
+          leftMotor.drive(leftSpeed);
+        }
       }
 
 
-      // Linjen forsvant på høyre side
-      else if (lostDirection == 1) {
+      // =================================================
+      // VANLIG PD-STYRING
+      // =================================================
 
-        rightMotor.drive(topSpeed);
-        leftMotor.drive(-topSpeed);
-      }
-
-
-      // Vi vet ikke hvor linjen er
       else {
 
-        rightMotor.stop();
-        leftMotor.stop();
+        // ----------------------------------------------
+        // PD
+        // ----------------------------------------------
+
+        int turn =
+          error * proportionalGain +
+          derivative * derivativeGain;
+
+
+        turn = constrain(
+          turn,
+          -maxTurn,
+          maxTurn
+        );
+
+
+        // ----------------------------------------------
+        // DYNAMISK FART
+        // ----------------------------------------------
+
+        int slowdown =
+          abs(error) / slowdownDivisor;
+
+
+        slowdown = constrain(
+          slowdown,
+          0,
+          maxSlowdown
+        );
+
+
+        int currentBaseSpeed =
+          baseSpeed - slowdown;
+
+
+        // ----------------------------------------------
+        // MOTORHASTIGHETER
+        // ----------------------------------------------
+
+        int rightSpeed = constrain(
+          currentBaseSpeed + turn,
+          -topSpeed,
+          topSpeed
+        );
+
+
+        int leftSpeed = constrain(
+          currentBaseSpeed - turn,
+          -topSpeed,
+          topSpeed
+        );
+
+
+        lastRightSpeed = rightSpeed;
+        lastLeftSpeed = leftSpeed;
+
+
+        rightMotor.drive(rightSpeed);
+        leftMotor.drive(leftSpeed);
       }
     }
 
 
+    // ==================================================
+    // LINJEN MIDLERTIDIG BORTE
+    //
+    // Sannsynligvis hump.
+    // Fortsett med siste kjente styring i opptil 100 ms.
+    // ==================================================
+
+    else if (
+      millis() - lastSeenMs < lostGraceMs
+    ) {
+
+      rightMotor.drive(lastRightSpeed);
+      leftMotor.drive(lastLeftSpeed);
+    }
+
 
     // ==================================================
-    // NORMAL LINJEFØLGING
+    // LINJEN FORTSATT BORTE
+    // SEARCH SIDE 0
+    // ==================================================
+
+    else if (lostDirection == 0) {
+
+      rightMotor.drive(searchSlowSpeed);
+      leftMotor.drive(searchFastSpeed);
+    }
+
+
+    // ==================================================
+    // LINJEN FORTSATT BORTE
+    // SEARCH SIDE 1
+    // ==================================================
+
+    else if (lostDirection == 1) {
+
+      rightMotor.drive(searchFastSpeed);
+      leftMotor.drive(searchSlowSpeed);
+    }
+
+
+    // ==================================================
+    // VI VET IKKE HVOR LINJEN ER
     // ==================================================
 
     else {
 
-      lastLeftSpeed = leftSpeed;
-      lastRightSpeed = rightSpeed;
-
-
-      rightMotor.drive(rightSpeed);
-      leftMotor.drive(leftSpeed);
+      rightMotor.stop();
+      leftMotor.stop();
     }
   }
-
 
 
   // ====================================================
